@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: binance-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-binance}
+      POSTGRES_USER: ${POSTGRES_USER:-binance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-binance}
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-binance}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+
+  app:
+    build: .
+    container_name: binance-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/binance}
+      DB_USER: ${POSTGRES_USER:-binance}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-binance}
+      BINANCE_POLL_INTERVAL: ${BINANCE_POLL_INTERVAL:-PT10S}
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com}
+      BINANCE_SYMBOL: ${BINANCE_SYMBOL:-BNBUSDT}
+    ports:
+      - "8080:8080"
