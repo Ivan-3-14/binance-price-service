@@ -1,0 +1,37 @@
+databaseChangeLog:
+  - changeSet:
+      id: 1-create-price-snapshots
+      author: ivan
+      changes:
+        - createTable:
+            tableName: price_snapshots
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: symbol
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: price
+                  type: NUMERIC(30,10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fetched_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  constraints:
+                    nullable: false
+        - createIndex:
+            indexName: idx_symbol_fetched_at
+            tableName: price_snapshots
+            columns:
+              - column:
+                  name: symbol
+              - column:
+                  name: fetched_at
