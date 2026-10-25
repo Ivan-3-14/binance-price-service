@@ -25,7 +25,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Optional;
 
 @Service
 @Slf4j
@@ -42,13 +41,12 @@ public class PriceServiceImpl implements PriceService {
     private String symbol;
 
     @Override
-    @Transactional
-    public Optional<PriceSnapshot> fetchAndSave() {
+    public void fetchAndSave() {
         try {
             BinanceAvgPriceResponse response = binanceClient.fetchAvgPrice(symbol);
             if (response == null || response.price() == null) {
                 log.warn("Empty response from Binance for {}", symbol);
-                return Optional.empty();
+                return;
             }
             BigDecimal price = new BigDecimal(response.price());
             Instant fetchedAt = Instant.now();
@@ -59,16 +57,12 @@ public class PriceServiceImpl implements PriceService {
                     .build();
             PriceSnapshot saved = repository.save(snapshot);
             log.info("Saved {} price={} at {}", symbol, price, fetchedAt);
-            return Optional.of(saved);
         } catch (HttpClientErrorException.TooManyRequests e) {
             log.warn("Binance rate limit hit (429), skipping this tick");
-            return Optional.empty();
         } catch (RestClientResponseException e) {
             log.warn("Binance returned {}: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return Optional.empty();
         } catch (Exception e) {
             log.error("Unexpected error while fetching Binance price", e);
-            return Optional.empty();
         }
     }
 
