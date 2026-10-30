@@ -1,5 +1,6 @@
 package by.senla.binancepriceservice.service.impl;
 
+import by.senla.binancepriceservice.exception.RateLimitException;
 import by.senla.binancepriceservice.exception.ResourceNotFoundException;
 import by.senla.binancepriceservice.service.PriceService;
 import by.senla.binancepriceservice.client.BinanceClient;
@@ -11,24 +12,25 @@ import by.senla.binancepriceservice.dto.PriceResponse;
 import by.senla.binancepriceservice.dto.TrendResponse;
 import by.senla.binancepriceservice.dto.enums.Trend;
 import by.senla.binancepriceservice.repository.PriceSnapshotRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.HttpClientErrorException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class PriceServiceImpl implements PriceService {
 
     private static final BigDecimal TREND_FLAT_THRESHOLD = new BigDecimal("0.001");
@@ -36,34 +38,67 @@ public class PriceServiceImpl implements PriceService {
 
     private final BinanceClient binanceClient;
     private final PriceSnapshotRepository repository;
+    private final String symbol;
 
-    @Value("${binance.symbol}")
-    private String symbol;
+    private final Duration defaultRetryAfter;
+
+    public PriceServiceImpl(BinanceClient binanceClient,
+                            PriceSnapshotRepository repository,
+                            @Value("${binance.symbol}") String symbol,
+                            @Value("${binance.default-retry-after}") Duration defaultRetryAfter
+    ) {
+        this.binanceClient = binanceClient;
+        this.repository = repository;
+        this.symbol = symbol;
+        this.defaultRetryAfter = defaultRetryAfter;
+    }
 
     @Override
     public void fetchAndSave() {
+        BinanceAvgPriceResponse response;
+
         try {
-            BinanceAvgPriceResponse response = binanceClient.fetchAvgPrice(symbol);
-            if (response == null || response.price() == null) {
-                log.warn("Empty response from Binance for {}", symbol);
-                return;
-            }
-            BigDecimal price = new BigDecimal(response.price());
-            Instant fetchedAt = Instant.now();
-            PriceSnapshot snapshot = PriceSnapshot.builder()
-                    .symbol(symbol)
-                    .price(price)
-                    .fetchedAt(fetchedAt)
-                    .build();
-            PriceSnapshot saved = repository.save(snapshot);
-            log.info("Saved {} price={} at {}", symbol, price, fetchedAt);
+            response = binanceClient.fetchAvgPrice(symbol);
         } catch (HttpClientErrorException.TooManyRequests e) {
-            log.warn("Binance rate limit hit (429), skipping this tick");
+            String retryAfterHeader = e.getResponseHeaders() != null ?
+                    e.getResponseHeaders().getFirst("Retry-After") : null;
+
+            long retryAfterSeconds = defaultRetryAfter.getSeconds();
+
+            if (retryAfterHeader != null) {
+                try {
+                    retryAfterSeconds = Long.parseLong(retryAfterHeader);
+                } catch (NumberFormatException ex) {
+                    log.warn("Failed to parse Retry-After header: {}", retryAfterHeader);
+                }
+            }
+
+            log.warn("Binance rate limit hit (429) for {}. Retry-After: {} seconds.", symbol, retryAfterSeconds);
+            throw new RateLimitException(retryAfterSeconds);
+
         } catch (RestClientResponseException e) {
-            log.warn("Binance returned {}: {}", e.getStatusCode(), e.getResponseBodyAsString());
-        } catch (Exception e) {
-            log.error("Unexpected error while fetching Binance price", e);
+            log.warn("Binance returned HTTP error for {}: {}", symbol, e.getStatusCode());
+            return;
+        } catch (RestClientException e) {
+            log.error("Network error while fetching price from Binance for {}", symbol, e);
+            return;
         }
+
+        if (response == null || response.price() == null || response.price().isBlank()) {
+            log.warn("Empty or malformed response from Binance for {}", symbol);
+            return;
+        }
+
+        PriceSnapshot snapshot;
+        try {
+            snapshot = toEntity(response);
+        } catch (NumberFormatException e) {
+            log.warn("Failed to parse price '{}' from Binance for {}", symbol, response.price());
+            return;
+        }
+
+        repository.save(snapshot);
+        log.info("Saved {} price={} at {}", symbol, snapshot.getPrice(), snapshot.getFetchedAt());
     }
 
     @Override
@@ -92,8 +127,11 @@ public class PriceServiceImpl implements PriceService {
         if (page < 0 || size <= 0 || size > 200) {
             throw new IllegalArgumentException("Invalid pagination params");
         }
+
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "fetchedAt"));
+
         Page<PriceSnapshot> result = repository.findBySymbolAndFetchedAtBetween(
-                symbol, from, to, PageRequest.of(page, size));
+                symbol, from, to, pageRequest);
         return new PagedPricesResponse(
                 result.getContent().stream().map(this::toResponse).toList(),
                 page, size, result.getTotalElements(), result.hasNext());
@@ -104,11 +142,14 @@ public class PriceServiceImpl implements PriceService {
     public TrendResponse getTrend(Instant from, Instant to) {
         validateRange(from, to);
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
+
         BigDecimal firstHalf = repository.findAveragePrice(symbol, from, mid);
         BigDecimal secondHalf = repository.findAveragePrice(symbol, mid, to);
+
         if (firstHalf == null || secondHalf == null) {
             throw new ResourceNotFoundException("Not enough data for trend calculation in this interval");
         }
+
         Trend trend = calculateTrend(firstHalf, secondHalf);
         return new TrendResponse(
                 symbol,
@@ -118,6 +159,9 @@ public class PriceServiceImpl implements PriceService {
     }
 
     private Trend calculateTrend(BigDecimal first, BigDecimal second) {
+        if (first.compareTo(BigDecimal.ZERO) == 0) {
+            return Trend.FLAT;
+        }
         BigDecimal diff = second.subtract(first);
         BigDecimal threshold = first.abs().multiply(TREND_FLAT_THRESHOLD);
         if (diff.abs().compareTo(threshold) <= 0) {
@@ -137,5 +181,16 @@ public class PriceServiceImpl implements PriceService {
 
     private PriceResponse toResponse(PriceSnapshot s) {
         return new PriceResponse(s.getSymbol(), s.getPrice(), s.getFetchedAt());
+    }
+
+    private PriceSnapshot toEntity(BinanceAvgPriceResponse response) {
+        BigDecimal price = new BigDecimal(response.price());
+        Instant fetchedAt = Instant.now();
+
+        return PriceSnapshot.builder()
+                .symbol(symbol)
+                .price(price)
+                .fetchedAt(fetchedAt)
+                .build();
     }
 }

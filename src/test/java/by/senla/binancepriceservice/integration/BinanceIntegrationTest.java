@@ -20,18 +20,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Optional;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
-import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
-import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
-import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
-import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
-import static com.github.tomakehurst.wiremock.client.WireMock.verify;
-import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
-@ActiveProfiles("test")
 @Testcontainers
 @SpringBootTest
+@ActiveProfiles("test")
 class BinanceIntegrationTest {
 
     @Container
@@ -50,7 +44,6 @@ class BinanceIntegrationTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
-
         registry.add("binance.base-url", () -> "http://localhost:" + wireMockServer.port());
         registry.add("binance.poll-interval", () -> "PT24H");
     }
@@ -79,8 +72,8 @@ class BinanceIntegrationTest {
                 .willReturn(aResponse()
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
-                            {"mins":5,"price":"601.98765432","closeTime":1234567890}
-                        """)));
+                        {"mins":5,"price":"601.98765432"}
+                    """)));
 
         priceService.fetchAndSave();
 

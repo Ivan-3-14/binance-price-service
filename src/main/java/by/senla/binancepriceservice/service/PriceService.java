@@ -18,6 +18,4 @@ public interface PriceService {
     PagedPricesResponse getPage(Instant from, Instant to, int page, int size);
 
     TrendResponse getTrend(Instant from, Instant to);
-
-
 }
