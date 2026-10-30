@@ -48,6 +48,7 @@ docker compose up --build
 | `DB_URL` | `jdbc:postgresql://localhost:5432/binance` | PostgreSQL JDBC URL |
 | `DB_USER` | `binance` | Database username |
 | `DB_PASSWORD` | `binance` | Database password |
+| `BINANCE_DEFAULT_RETRY_AFTER` | `30s` | Fallback delay if Retry-After is missing |
 
 ## API Examples
 
@@ -110,6 +111,10 @@ is treated as a new observation.
 *   **Scheduler disabled in tests:** `@Profile("!test")` is used on the scheduler to prevent background tasks from 
 interfering with integration tests. The scheduler's delegation logic is covered by a dedicated unit test 
 (`PriceSchedulerTest`).
+
+* **Error Handling Policy:** The service catches Binance-related exceptions (RestClientException, HTTP errors) and 
+continues. Unexpected runtime exceptions (e.g., bugs) are propagated to the scheduler, which logs them and reschedules.
+This ensures the schedule is not stopped by unexpected errors.
 
 ## Testing
 

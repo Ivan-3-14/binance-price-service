@@ -73,6 +73,8 @@ public class PriceServiceImpl implements PriceService {
                 }
             }
 
+            retryAfterSeconds = Math.max(1, retryAfterSeconds);
+
             log.warn("Binance rate limit hit (429) for {}. Retry-After: {} seconds.", symbol, retryAfterSeconds);
             throw new RateLimitException(retryAfterSeconds);
 
@@ -142,9 +144,10 @@ public class PriceServiceImpl implements PriceService {
     public TrendResponse getTrend(Instant from, Instant to) {
         validateRange(from, to);
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
+        Instant secondHalfStart = mid.plusMillis(1);
 
         BigDecimal firstHalf = repository.findAveragePrice(symbol, from, mid);
-        BigDecimal secondHalf = repository.findAveragePrice(symbol, mid, to);
+        BigDecimal secondHalf = repository.findAveragePrice(symbol, secondHalfStart, to);
 
         if (firstHalf == null || secondHalf == null) {
             throw new ResourceNotFoundException("Not enough data for trend calculation in this interval");

@@ -56,8 +56,10 @@ public class PriceScheduler {
             priceService.fetchAndSave();
             scheduleNext(defaultInterval);
         } catch (RateLimitException e) {
-            Duration waitTime = Duration.ofSeconds(e.getRetryAfterSeconds());
-            log.warn("Rate limit backoff: scheduling next run in {} seconds", e.getRetryAfterSeconds());
+
+            long waitSeconds = Math.min(e.getRetryAfterSeconds(), 300);
+            Duration waitTime = Duration.ofSeconds(waitSeconds);
+            log.warn("Rate limit backoff: scheduling next run in {} seconds", waitSeconds);
             scheduleNext(waitTime);
         }catch (Exception e) {
             log.error("Unexpected error in scheduler", e);

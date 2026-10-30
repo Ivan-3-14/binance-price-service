@@ -217,10 +217,11 @@ class PriceServiceImplTest {
     @Test
     void getTrendReturnUpward() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
+        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid))
                 .thenReturn(new BigDecimal("100.0"));
-        when(repository.findAveragePrice("BNBUSDT", mid, to))
+        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to))
                 .thenReturn(new BigDecimal("110.0"));
 
         TrendResponse result = priceService.getTrend(from, to);
@@ -233,10 +234,11 @@ class PriceServiceImplTest {
     @Test
     void getTrendReturnDownward() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
+        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid))
                 .thenReturn(new BigDecimal("110.0"));
-        when(repository.findAveragePrice("BNBUSDT", mid, to))
+        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to))
                 .thenReturn(new BigDecimal("100.0"));
 
         TrendResponse result = priceService.getTrend(from, to);
@@ -246,10 +248,11 @@ class PriceServiceImplTest {
     @Test
     void getTrendReturnFlatWhenWithinThreshold() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
+        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid))
                 .thenReturn(new BigDecimal("100.00"));
-        when(repository.findAveragePrice("BNBUSDT", mid, to))
+        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to))
                 .thenReturn(new BigDecimal("100.05"));
 
         TrendResponse result = priceService.getTrend(from, to);
@@ -259,9 +262,10 @@ class PriceServiceImplTest {
     @Test
     void getTrendThrowWhenNotEnoughData() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
+        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid)).thenReturn(null);
-        when(repository.findAveragePrice("BNBUSDT", mid, to)).thenReturn(null);
+        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to)).thenReturn(null);
 
         assertThatThrownBy(() -> priceService.getTrend(from, to))
                 .isInstanceOf(ResourceNotFoundException.class);

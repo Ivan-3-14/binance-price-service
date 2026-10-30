@@ -1,16 +1,21 @@
 package by.senla.binancepriceservice.scheduler;
 
+import by.senla.binancepriceservice.exception.RateLimitException;
 import by.senla.binancepriceservice.service.PriceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.TaskScheduler;
 
 import java.time.Duration;
+import java.time.Instant;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -22,7 +27,6 @@ class PriceSchedulerTest {
     @Mock
     private TaskScheduler taskScheduler;
 
-    @InjectMocks
     private PriceScheduler scheduler;
 
     @BeforeEach
@@ -31,8 +35,38 @@ class PriceSchedulerTest {
     }
 
     @Test
-    void poll_shouldDelegateToService() {
+    void pollDelegateToService() {
         scheduler.poll();
         verify(priceService).fetchAndSave();
+        verify(taskScheduler).schedule(any(), any(Instant.class));
+    }
+
+    @Test
+    void pollRescheduleWithBackoffOnRateLimit() {
+        doThrow(new RateLimitException(60)).when(priceService).fetchAndSave();
+
+        scheduler.poll();
+
+        ArgumentCaptor<Instant> captor = ArgumentCaptor.forClass(Instant.class);
+        verify(taskScheduler).schedule(any(), captor.capture());
+        Instant scheduledTime = captor.getValue();
+        assertThat(scheduledTime).isAfter(Instant.now().plusSeconds(59));
+    }
+
+    @Test
+    void pollRescheduleWithDefaultInterval() {
+        scheduler.poll();
+
+        verify(priceService).fetchAndSave();
+        verify(taskScheduler).schedule(any(), any(Instant.class));
+    }
+
+    @Test
+    void pollShouldRescheduleWithDefaultIntervalOnUnexpectedError() {
+        doThrow(new RuntimeException("Unexpected")).when(priceService).fetchAndSave();
+
+        scheduler.poll();
+
+        verify(taskScheduler).schedule(any(), any(Instant.class));
     }
 }
