@@ -267,6 +267,8 @@ class PriceServiceImplTest {
                 .thenReturn(new BigDecimal("100.0"));
         when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
                 .thenReturn(new BigDecimal("110.0"));
+        when(trendCalculator.calculate(new BigDecimal("100.0"), new BigDecimal("110.0")))
+                .thenReturn(Trend.UPWARD);
 
         TrendResponse result = priceService.getTrend(from, to);
         assertThat(result.trend()).isEqualTo(Trend.UPWARD);
@@ -280,6 +282,8 @@ class PriceServiceImplTest {
                 .thenReturn(new BigDecimal("110.0"));
         when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
                 .thenReturn(new BigDecimal("100.0"));
+        when(trendCalculator.calculate(new BigDecimal("110.0"), new BigDecimal("100.0")))
+                .thenReturn(Trend.DOWNWARD);
 
         TrendResponse result = priceService.getTrend(from, to);
         assertThat(result.trend()).isEqualTo(Trend.DOWNWARD);
@@ -293,6 +297,8 @@ class PriceServiceImplTest {
                 .thenReturn(new BigDecimal("100.00"));
         when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
                 .thenReturn(new BigDecimal("100.05"));
+        when(trendCalculator.calculate(new BigDecimal("100.00"), new BigDecimal("100.05")))
+                .thenReturn(Trend.FLAT);
 
         TrendResponse result = priceService.getTrend(from, to);
         assertThat(result.trend()).isEqualTo(Trend.FLAT);
@@ -317,6 +323,8 @@ class PriceServiceImplTest {
                 .thenReturn(new BigDecimal("125.0"));
         when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
                 .thenReturn(new BigDecimal("200.0"));
+        when(trendCalculator.calculate(any(), any()))
+                .thenReturn(Trend.UPWARD);
 
         TrendResponse result = priceService.getTrend(from, to);
 
