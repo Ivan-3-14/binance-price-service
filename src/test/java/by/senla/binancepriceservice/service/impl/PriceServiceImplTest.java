@@ -11,6 +11,7 @@ import by.senla.binancepriceservice.dto.enums.Trend;
 import by.senla.binancepriceservice.exception.RateLimitException;
 import by.senla.binancepriceservice.exception.ResourceNotFoundException;
 import by.senla.binancepriceservice.repository.PriceSnapshotRepository;
+import by.senla.binancepriceservice.service.TrendCalculator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,6 +47,9 @@ class PriceServiceImplTest {
     @Mock
     private PriceSnapshotRepository repository;
 
+    @Mock
+    private TrendCalculator trendCalculator;
+
     private PriceServiceImpl priceService;
 
     private final Instant from = Instant.parse("2026-10-01T00:00:00Z");
@@ -53,7 +57,13 @@ class PriceServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        priceService = new PriceServiceImpl(binanceClient, repository, "BNBUSDT", Duration.ofSeconds(30));
+        priceService = new PriceServiceImpl(
+                binanceClient,
+                repository,
+                trendCalculator,
+                "BNBUSDT",
+                Duration.ofSeconds(30)
+        );
     }
 
     @Test

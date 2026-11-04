@@ -12,6 +12,7 @@ import by.senla.binancepriceservice.dto.PriceResponse;
 import by.senla.binancepriceservice.dto.TrendResponse;
 import by.senla.binancepriceservice.dto.enums.Trend;
 import by.senla.binancepriceservice.repository.PriceSnapshotRepository;
+import by.senla.binancepriceservice.service.TrendCalculator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -34,22 +35,24 @@ import java.time.ZoneOffset;
 @Slf4j
 public class PriceServiceImpl implements PriceService {
 
-    private static final BigDecimal TREND_FLAT_THRESHOLD = new BigDecimal("0.001");
     private static final int FINANCIAL_SCALE = 10;
 
     private final BinanceClient binanceClient;
     private final PriceSnapshotRepository repository;
+    private final TrendCalculator trendCalculator;
     private final String symbol;
 
     private final Duration defaultRetryAfter;
 
     public PriceServiceImpl(BinanceClient binanceClient,
                             PriceSnapshotRepository repository,
+                            TrendCalculator trendCalculator,
                             @Value("${binance.symbol}") String symbol,
                             @Value("${binance.default-retry-after}") Duration defaultRetryAfter
     ) {
         this.binanceClient = binanceClient;
         this.repository = repository;
+        this.trendCalculator = trendCalculator;
         this.symbol = symbol;
         this.defaultRetryAfter = defaultRetryAfter;
     }
@@ -168,24 +171,12 @@ public class PriceServiceImpl implements PriceService {
             throw new ResourceNotFoundException("Not enough data for trend calculation in this interval");
         }
 
-        Trend trend = calculateTrend(firstHalf, secondHalf);
+        Trend trend = trendCalculator.calculate(firstHalf, secondHalf);
         return new TrendResponse(
                 symbol,
                 from.atZone(ZoneOffset.UTC).toLocalDate(),
                 to.atZone(ZoneOffset.UTC).toLocalDate(),
                 trend);
-    }
-
-    private Trend calculateTrend(BigDecimal first, BigDecimal second) {
-        if (first.compareTo(BigDecimal.ZERO) == 0) {
-            return Trend.FLAT;
-        }
-        BigDecimal diff = second.subtract(first);
-        BigDecimal threshold = first.abs().multiply(TREND_FLAT_THRESHOLD);
-        if (diff.abs().compareTo(threshold) <= 0) {
-            return Trend.FLAT;
-        }
-        return diff.signum() > 0 ? Trend.UPWARD : Trend.DOWNWARD;
     }
 
     private void validateRange(Instant from, Instant to) {

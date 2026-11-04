@@ -49,6 +49,7 @@ docker compose up --build
 | `DB_USER` | `binance` | Database username |
 | `DB_PASSWORD` | `binance` | Database password |
 | `BINANCE_DEFAULT_RETRY_AFTER` | `30s` | Fallback delay if Retry-After is missing |
+| `BINANCE_TREND_FLAT_THRESHOLD` | `0.001` | Threshold for FLAT trend (0.1%) |
 
 ## API Examples
 
@@ -118,9 +119,9 @@ Liquibase manages it.
 the Retry-After header from Binance. This ensures the service respects Binance's rate limits without blocking the
 scheduler thread.
 
-*   **Idempotency:** The service does not deduplicate records. Binance closeTime changes every 5 minutes, but polling
-happens every 10 seconds. Attempting to deduplicate by closeTime would drop valid observations. Therefore, every poll
-is treated as a new observation.
+*   **Idempotency:** The service does not deduplicate records. Binance `/avgPrice` returns a 5-minute average, which 
+changes every 5 minutes, but polling happens every 10 seconds. Attempting to deduplicate by `fetchedAt` would drop 
+valid observations. Therefore, every poll is treated as a new observation.
 
 *   **Scheduler disabled in tests:** `@Profile("!test")` is used on the scheduler to prevent background tasks from 
 interfering with integration tests. The scheduler's delegation logic is covered by a dedicated unit test 
