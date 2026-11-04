@@ -35,26 +35,23 @@ class PriceSchedulerTest {
     }
 
     @Test
-    void pollDelegateToService() {
-        scheduler.poll();
-        verify(priceService).fetchAndSave();
-        verify(taskScheduler).schedule(any(), any(Instant.class));
-    }
-
-    @Test
     void pollRescheduleWithBackoffOnRateLimit() {
         doThrow(new RateLimitException(60)).when(priceService).fetchAndSave();
 
+        Instant before = Instant.now();
         scheduler.poll();
+        Instant after = Instant.now();
 
         ArgumentCaptor<Instant> captor = ArgumentCaptor.forClass(Instant.class);
         verify(taskScheduler).schedule(any(), captor.capture());
         Instant scheduledTime = captor.getValue();
-        assertThat(scheduledTime).isAfter(Instant.now().plusSeconds(59));
+
+        assertThat(scheduledTime).isAfter(before.plusSeconds(59));
+        assertThat(scheduledTime).isBefore(after.plusSeconds(61));
     }
 
     @Test
-    void pollRescheduleWithDefaultInterval() {
+    void pollDelegateToServiceAndRescheduleWithDefaultInterval() {
         scheduler.poll();
 
         verify(priceService).fetchAndSave();
@@ -62,7 +59,7 @@ class PriceSchedulerTest {
     }
 
     @Test
-    void pollShouldRescheduleWithDefaultIntervalOnUnexpectedError() {
+    void pollRescheduleWithDefaultIntervalOnUnexpectedError() {
         doThrow(new RuntimeException("Unexpected")).when(priceService).fetchAndSave();
 
         scheduler.poll();

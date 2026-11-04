@@ -19,8 +19,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.HttpClientErrorException;
 
 import java.math.BigDecimal;
@@ -78,11 +79,24 @@ public class PriceServiceImpl implements PriceService {
             log.warn("Binance rate limit hit (429) for {}. Retry-After: {} seconds.", symbol, retryAfterSeconds);
             throw new RateLimitException(retryAfterSeconds);
 
-        } catch (RestClientResponseException e) {
-            log.warn("Binance returned HTTP error for {}: {}", symbol, e.getStatusCode());
+        } catch (HttpClientErrorException.BadRequest e) {
+            log.error("Invalid request to Binance (400). Check BINANCE_SYMBOL: {}", symbol);
             return;
+
+        } catch (HttpClientErrorException e) {
+            log.warn("Binance returned client error for {}: {}", symbol, e.getStatusCode());
+            return;
+
+        } catch (HttpServerErrorException e) {
+            log.warn("Binance server error for {}: {}", symbol, e.getStatusCode());
+            return;
+
+        } catch (ResourceAccessException e) {
+            log.warn("Network error while fetching price from Binance for {}: {}", symbol, e.getMessage());
+            return;
+
         } catch (RestClientException e) {
-            log.error("Network error while fetching price from Binance for {}", symbol, e);
+            log.warn("Unexpected response from Binance for {}: {}", symbol, e.getMessage());
             return;
         }
 
@@ -100,7 +114,7 @@ public class PriceServiceImpl implements PriceService {
         }
 
         repository.save(snapshot);
-        log.info("Saved {} price={} at {}", symbol, snapshot.getPrice(), snapshot.getFetchedAt());
+        log.debug("Saved {} price={} at {}", symbol, snapshot.getPrice(), snapshot.getFetchedAt());
     }
 
     @Override
@@ -130,7 +144,9 @@ public class PriceServiceImpl implements PriceService {
             throw new IllegalArgumentException("Invalid pagination params");
         }
 
-        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "fetchedAt"));
+        Sort sort = Sort.by(Sort.Direction.DESC, "fetchedAt")
+                .and(Sort.by(Sort.Direction.DESC, "id"));
+        PageRequest pageRequest = PageRequest.of(page, size, sort);
 
         Page<PriceSnapshot> result = repository.findBySymbolAndFetchedAtBetween(
                 symbol, from, to, pageRequest);
@@ -144,10 +160,9 @@ public class PriceServiceImpl implements PriceService {
     public TrendResponse getTrend(Instant from, Instant to) {
         validateRange(from, to);
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
-        Instant secondHalfStart = mid.plusMillis(1);
 
         BigDecimal firstHalf = repository.findAveragePrice(symbol, from, mid);
-        BigDecimal secondHalf = repository.findAveragePrice(symbol, secondHalfStart, to);
+        BigDecimal secondHalf = repository.findAveragePriceAfter(symbol, mid, to);
 
         if (firstHalf == null || secondHalf == null) {
             throw new ResourceNotFoundException("Not enough data for trend calculation in this interval");
@@ -177,7 +192,7 @@ public class PriceServiceImpl implements PriceService {
         if (from == null || to == null) {
             throw new IllegalArgumentException("'from' and 'to' are required");
         }
-        if (from.isAfter(to)) {
+        if (!from.isBefore(to)) {
             throw new IllegalArgumentException("'from' must be before 'to'");
         }
     }

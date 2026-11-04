@@ -1,6 +1,7 @@
 package by.senla.binancepriceservice.integration;
 
 import by.senla.binancepriceservice.domain.PriceSnapshot;
+import by.senla.binancepriceservice.exception.RateLimitException;
 import by.senla.binancepriceservice.repository.PriceSnapshotRepository;
 import by.senla.binancepriceservice.service.PriceService;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -20,8 +21,15 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Optional;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.verify;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 @SpringBootTest
@@ -46,6 +54,7 @@ class BinanceIntegrationTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("binance.base-url", () -> "http://localhost:" + wireMockServer.port());
         registry.add("binance.poll-interval", () -> "PT24H");
+        registry.add("binance.default-retry-after", () -> "1s");
     }
 
     @BeforeAll
@@ -86,5 +95,21 @@ class BinanceIntegrationTest {
 
         verify(getRequestedFor(urlPathEqualTo("/api/v3/avgPrice"))
                 .withQueryParam("symbol", equalTo("BNBUSDT")));
+    }
+
+    @Test
+    void fetchAndSaveThrowRateLimitOn429() {
+        stubFor(get(urlPathEqualTo("/api/v3/avgPrice"))
+                .withQueryParam("symbol", equalTo("BNBUSDT"))
+                .willReturn(aResponse()
+                        .withStatus(429)
+                        .withHeader("Retry-After", "60")));
+
+        assertThatThrownBy(() -> priceService.fetchAndSave())
+                .isInstanceOf(RateLimitException.class)
+                .extracting("retryAfterSeconds")
+                .isEqualTo(60L);
+
+        assertThat(repository.count()).isZero();
     }
 }

@@ -77,6 +77,20 @@ GET http://localhost:8080/api/v1/prices/trend?from=2026-10-01T00:00:00Z&to=2026-
 ```
 
 
+### Error responses
+
+All errors follow RFC 7807 (`ProblemDetail`):
+
+```json
+{
+  "type": "about:blank",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "'from' must be before 'to'",
+  "instance": "/api/v1/prices/average"
+}
+```
+
 ## Design Decisions & Trade-offs
 
 *   **RestClient with explicit timeouts:** The scenario is synchronous. `RestClient` is the modern synchronous HTTP 
@@ -87,7 +101,7 @@ using `JdkClientHttpRequestFactory` to guarantee the scheduler thread cannot han
 unacceptable for cryptocurrency prices.
 
 *   **TaskScheduler for dynamic polling:** Allows rescheduling the next poll based on Retry-After header, unlike
-@Scheduled(fixedDelay) which has a fixed interval.
+`@Scheduled(fixedDelay)` which has a fixed interval.
 
 *   **No @Transactional on fetchAndSave:** Holding a DB transaction open during a network call exhausts the connection 
 pool. `@Transactional` is used only for reading. Saving is done via save(), which opens a short transaction.

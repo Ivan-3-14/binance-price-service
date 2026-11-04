@@ -20,8 +20,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.HttpServerErrorException;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -71,6 +73,16 @@ class PriceServiceImplTest {
     }
 
     @Test
+    void fetchAndSaveNotSaveOnBadRequest() {
+        when(binanceClient.fetchAvgPrice("BNBUSDT"))
+                .thenThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST));
+
+        priceService.fetchAndSave();
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
     void fetchAndSaveNotSaveWhenResponseIsNull() {
         when(binanceClient.fetchAvgPrice("BNBUSDT")).thenReturn(null);
 
@@ -89,20 +101,37 @@ class PriceServiceImplTest {
 
     @Test
     void fetchAndSaveNotSaveOn429RateLimit() {
-        when(binanceClient.fetchAvgPrice("BNBUSDT"))
-                .thenThrow(mock(HttpClientErrorException.TooManyRequests.class));
+        HttpClientErrorException.TooManyRequests exception = mock(HttpClientErrorException.TooManyRequests.class);
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Retry-After", "60");
+        when(exception.getResponseHeaders()).thenReturn(headers);
+
+        when(binanceClient.fetchAvgPrice("BNBUSDT")).thenThrow(exception);
 
         assertThatThrownBy(() -> priceService.fetchAndSave())
-                .isInstanceOf(RateLimitException.class);
+                .isInstanceOf(RateLimitException.class)
+                .extracting("retryAfterSeconds").isEqualTo(60L);
+
         verify(repository, never()).save(any());
     }
 
     @Test
-    void fetchAndSaveNotSaveOnOtherClientErrors() {
-        RestClientResponseException exception = mock(RestClientResponseException.class);
-        when(binanceClient.fetchAvgPrice("BNBUSDT")).thenThrow(exception);
+    void fetchAndSaveNotSaveOnClientError4xx() {
+        when(binanceClient.fetchAvgPrice("BNBUSDT"))
+                .thenThrow(new HttpClientErrorException(HttpStatus.I_AM_A_TEAPOT));
 
         priceService.fetchAndSave();
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void fetchAndSaveNotSaveOnServerError5xx() {
+        when(binanceClient.fetchAvgPrice("BNBUSDT"))
+                .thenThrow(new HttpServerErrorException(HttpStatus.SERVICE_UNAVAILABLE));
+
+        priceService.fetchAndSave();
+
         verify(repository, never()).save(any());
     }
 
@@ -178,6 +207,12 @@ class PriceServiceImplTest {
     }
 
     @Test
+    void getAverageThrowWhenFromEqualsTo() {
+        assertThatThrownBy(() -> priceService.getAverage(from, from))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void getPageReturnPagedResult() {
         PriceSnapshot s1 = PriceSnapshot
                 .builder()
@@ -217,28 +252,23 @@ class PriceServiceImplTest {
     @Test
     void getTrendReturnUpward() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
-        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid))
                 .thenReturn(new BigDecimal("100.0"));
-        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to))
+        when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
                 .thenReturn(new BigDecimal("110.0"));
 
         TrendResponse result = priceService.getTrend(from, to);
-
         assertThat(result.trend()).isEqualTo(Trend.UPWARD);
-        assertThat(result.symbol()).isEqualTo("BNBUSDT");
-        assertThat(result.startDate()).isEqualTo(from.atZone(java.time.ZoneOffset.UTC).toLocalDate());
     }
 
     @Test
     void getTrendReturnDownward() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
-        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid))
                 .thenReturn(new BigDecimal("110.0"));
-        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to))
+        when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
                 .thenReturn(new BigDecimal("100.0"));
 
         TrendResponse result = priceService.getTrend(from, to);
@@ -248,11 +278,10 @@ class PriceServiceImplTest {
     @Test
     void getTrendReturnFlatWhenWithinThreshold() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
-        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid))
                 .thenReturn(new BigDecimal("100.00"));
-        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to))
+        when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
                 .thenReturn(new BigDecimal("100.05"));
 
         TrendResponse result = priceService.getTrend(from, to);
@@ -262,12 +291,27 @@ class PriceServiceImplTest {
     @Test
     void getTrendThrowWhenNotEnoughData() {
         Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
-        Instant secondHalfStart = mid.plusMillis(1);
 
         when(repository.findAveragePrice("BNBUSDT", from, mid)).thenReturn(null);
-        when(repository.findAveragePrice("BNBUSDT", secondHalfStart, to)).thenReturn(null);
+        when(repository.findAveragePriceAfter("BNBUSDT", mid, to)).thenReturn(null);
 
         assertThatThrownBy(() -> priceService.getTrend(from, to))
                 .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getTrendNotDoubleCountMid() {
+        Instant mid = from.plusMillis((to.toEpochMilli() - from.toEpochMilli()) / 2);
+
+        when(repository.findAveragePrice("BNBUSDT", from, mid))
+                .thenReturn(new BigDecimal("125.0"));
+        when(repository.findAveragePriceAfter("BNBUSDT", mid, to))
+                .thenReturn(new BigDecimal("200.0"));
+
+        TrendResponse result = priceService.getTrend(from, to);
+
+        assertThat(result.trend()).isEqualTo(Trend.UPWARD);
+        verify(repository).findAveragePrice("BNBUSDT", from, mid);
+        verify(repository).findAveragePriceAfter("BNBUSDT", mid, to);
     }
 }

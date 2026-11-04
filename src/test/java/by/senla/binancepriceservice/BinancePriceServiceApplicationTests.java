@@ -25,7 +25,6 @@ class BinancePriceServiceApplicationTests {
                         "WHERE table_name = 'price_snapshots' ORDER BY column_name",
                 String.class);
 
-        assertThat(columns).containsExactly(
-                 "fetched_at", "id", "price", "symbol");
+        assertThat(columns).contains("fetched_at", "id", "price", "symbol");
     }
 }

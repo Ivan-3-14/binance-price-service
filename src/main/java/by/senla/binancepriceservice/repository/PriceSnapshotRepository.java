@@ -25,4 +25,10 @@ public interface PriceSnapshotRepository extends JpaRepository<PriceSnapshot, Lo
     BigDecimal findAveragePrice(@Param("symbol") String symbol,
                                 @Param("from") Instant from,
                                 @Param("to") Instant to);
+
+    @Query("select avg(p.price) from PriceSnapshot p " +
+            "where p.symbol = :symbol and p.fetchedAt > :from and p.fetchedAt <= :to")
+    BigDecimal findAveragePriceAfter(@Param("symbol") String symbol,
+                                     @Param("from") Instant from,
+                                     @Param("to") Instant to);
 }
